@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</head>
+
+<body>
+<video id="video" style="width: 0; height: 0;" autoplay></video>
+
+<script>
+  const video = document.getElementById('video');
+
+  async function initCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+    await video.play();
+  }
+
+  const pose = new Pose.Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  pose.onResults((results) => {
+    const landmarks = results.poseLandmarks || [];
+    const payload = JSON.stringify(landmarks);
+    window.parent.postMessage({ landmarks: payload }, "*");
+  });
+
+  async function runPose() {
+    await initCamera();
+
+    const camera = new CameraUtils.Camera(video, {
+      onFrame: async () => {
+        await pose.send({ image: video });
+      },
+      width: 640,
+      height: 480
+    });
+
+    camera.start();
+  }
+
+  runPose();
+</script>
+</body>
+</html>
