@@ -1,17 +1,18 @@
 import streamlit as st
-import json
-import numpy as np
-import streamlit.components.v1 as components
 
+# ------------------------------------------------------------
+# PAGE SETUP
+# ------------------------------------------------------------
 st.set_page_config(page_title="Interview Coach", page_icon="💬")
 
 st.title("💬 Interview Coach")
 st.write("Practice interview skills through text or video.")
 
 # ------------------------------------------------------------
-# Create BOTH tabs BEFORE using them
+# CREATE BOTH TABS FIRST
 # ------------------------------------------------------------
 tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video Interview"])
+
 
 # ============================================================
 #  TAB 1 — TEXT INTERVIEW PRACTICE
@@ -70,129 +71,41 @@ with tab1:
 
             st.write("🛠️ **Suggestions:**")
             st.write("- Add one specific example.")
-            st.write("- Summarize your main point early.")
-            st.write("- Use the structure: *context → action → result*.")
+            st.write("- Summarize your main point up front.")
+            st.write("- Use: *context → action → result*.")
 
-            st.write("💛 **Reminder:** Clear communication matters more than 'perfect' performance.")
-            st.write("🎯 Try rewriting your answer in 3–4 sentences for clarity.")
+            st.write("💛 **Reminder:** You do not need to mask. Clear communication is enough.")
+            st.write("🎯 Practice again in 3–4 sentences for clarity.")
+
 
 
 # ============================================================
-#  TAB 2 — MEDIAPIPE JS REAL-TIME VIDEO ANALYSIS
+#  TAB 2 — SAFE PLACEHOLDER (NO ERRORS)
 # ============================================================
 with tab2:
 
-    st.header("🎥 Video Interview Practice (Real-Time Mediapipe JS)")
-    st.write("This tool analyzes your posture, head tilt, and movement in real time.")
+    st.header("🎥 Video Interview Practice")
 
-    # ------------------------------------------------------------
-    # Load and run Mediapipe JS in browser
-    # ------------------------------------------------------------
-    components.html(
-        open("mediapipe_component.html").read() +
-        """
-        <script>
-        // Listen for Mediapipe landmark data and forward to Streamlit
-        window.addEventListener("message", (e) => {
-            if (e.data.streamlitMessage) {
-                Streamlit.setComponentValue(e.data.streamlitMessage);
-            }
-        });
-        </script>
-        """,
-        height=0,
-        width=0,
+    st.info("""
+    🔧 **The real-time AI body-language analysis module is coming next.**
+
+    For now, this tab is a placeholder so your app deploys without errors.
+    """)
+
+    st.write("👇 This will soon become your live video feedback tool:")
+
+    st.image(
+        "https://cdn-icons-png.flaticon.com/512/1160/1160041.png",
+        width=250,
+        caption="Camera module loading soon…"
     )
 
-    # ------------------------------------------------------------
-    # Receive landmark data from JS -> Python
-    # ------------------------------------------------------------
-    st_js = st.experimental_js(
-        """
-        // Tell Streamlit to accept incoming messages from JS
-        window.addEventListener("message", (e) => {
-            if (e.data.streamlitMessage) {
-                Streamlit.setComponentValue(e.data.streamlitMessage);
-            }
-        });
-        """
-    )
+    st.write("""
+    ### What will be added:
+    - Real-time posture tracking  
+    - Head tilt detection  
+    - Movement level analysis  
+    - Neurodivergent-friendly feedback  
+    """)
 
-    # Parse the incoming JSON landmark list
-    try:
-        landmarks = json.loads(st_js or "[]")
-    except:
-        landmarks = []
-
-    st.write("Detected landmarks:", len(landmarks))
-
-    # ------------------------------------------------------------
-    # ANALYSIS FUNCTION
-    # ------------------------------------------------------------
-    def analyze(lm):
-        if len(lm) < 33:
-            return None
-
-        arr = np.array([[p["x"], p["y"], p["z"]] for p in lm])
-
-        nose = arr[0]
-        left_eye = arr[2]
-        right_eye = arr[5]
-        left_shoulder = arr[11]
-        right_shoulder = arr[12]
-
-        # Head tilt
-        head_tilt = ((left_eye[1] + right_eye[1]) / 2) - nose[1]
-
-        # Shoulder alignment (posture)
-        posture_angle = np.degrees(np.arctan2(
-            left_shoulder[1] - right_shoulder[1],
-            left_shoulder[0] - right_shoulder[0]
-        ))
-
-        # Movement detection
-        prev = st.session_state.get("prev_frame")
-        if prev is None:
-            st.session_state.prev_frame = arr
-            movement = 0
-        else:
-            movement = float(np.mean(np.abs(arr - prev)))
-            st.session_state.prev_frame = arr
-
-        return {
-            "head_tilt": head_tilt,
-            "posture_angle": posture_angle,
-            "movement": movement
-        }
-
-    # ------------------------------------------------------------
-    # RUN ANALYSIS AND DISPLAY FEEDBACK
-    # ------------------------------------------------------------
-    result = analyze(landmarks)
-
-    if result:
-        st.subheader("📊 Live Analysis")
-        st.json(result)
-
-        st.subheader("💡 Interpretation")
-
-        # Head tilt
-        if abs(result["head_tilt"]) < 0.03:
-            st.write("✔ Head centered")
-        else:
-            st.write("➤ Slight head tilt — try adjusting your camera height.")
-
-        # Posture
-        if abs(result["posture_angle"]) < 8:
-            st.write("✔ Shoulders look level (good posture)")
-        else:
-            st.write("➤ Uneven shoulders — try sitting tall or stabilizing your position.")
-
-        # Movement
-        if result["movement"] < 0.01:
-            st.write("✔ Movement steady")
-        else:
-            st.write("➤ Noticeable movement — grounding elbows can help reduce fidgeting.")
-
-
-  
+    st.success("Your app is working! Video AI module will be added safely.")
