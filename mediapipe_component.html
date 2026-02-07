@@ -4,21 +4,22 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
-
 <body>
-<video id="video" autoplay style="display:none;"></video>
+
+<video id="video" style="display:none;" autoplay></video>
 
 <script>
   const video = document.getElementById("video");
 
   async function initCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    video.srcObject = stream;
-    await video.play();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      await video.play();
   }
 
   const pose = new Pose.Pose({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
   });
 
   pose.setOptions({
@@ -29,24 +30,25 @@
   });
 
   pose.onResults((results) => {
-    const landmarks = results.poseLandmarks || [];
-    const message = JSON.stringify(landmarks);
-    window.parent.postMessage({ type: "FROM_JS", value: message }, "*");
+    const lm = results.poseLandmarks || [];
+    const encoded = encodeURIComponent(JSON.stringify(lm));
+
+    // Send the encoded landmarks back to Streamlit via URL query string
+    window.location.search = "?landmarks=" + encoded;
   });
 
-  async function run() {
+  async function runPose() {
     await initCamera();
-
     const camera = new CameraUtils.Camera(video, {
       onFrame: async () => {
         await pose.send({ image: video });
       }
     });
-
     camera.start();
   }
 
-  run();
+  runPose();
 </script>
+
 </body>
 </html>
