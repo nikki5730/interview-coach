@@ -11,7 +11,7 @@ st.write("Practice interview skills through text or video.")
 tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video Interview"])
 
 # ============================================================
-#  TAB 1 — TEXT INTERVIEW PRACTICE (UNCHANGED)
+#  TAB 1 — TEXT INTERVIEW PRACTICE
 # ============================================================
 with tab1:
 
@@ -95,13 +95,14 @@ with tab1:
             st.write("🎯 **Practice tip**")
             st.write("Try again in 3–4 sentences for clarity.")
 
+
 # ============================================================
-#  TAB 2 — ADVANCED VIDEO ANALYSIS (SAFE, FIXED)
+#  TAB 2 — ADVANCED VIDEO ANALYSIS
 # ============================================================
 with tab2:
 
     st.header("🎥 Video Interview Practice")
-    st.write("Record yourself, then click Generate Feedback.")
+    st.write("Record yourself, then generate feedback on posture, movement, lighting, and framing.")
 
     import cv2
     import numpy as np
@@ -111,15 +112,23 @@ with tab2:
     mp_pose = mp.solutions.pose
     mp_face = mp.solutions.face_detection
 
+    # -----------------------------
+    # Utility: posture angle
+    # -----------------------------
     def angle_with_vertical(p1, p2):
         dx = p2[0] - p1[0]
         dy = p2[1] - p1[1]
         return float(np.degrees(np.arctan2(dx, -dy)))
 
+    # -----------------------------
+    # Video Analysis Engine
+    # -----------------------------
     class VideoAnalyzer(VideoTransformerBase):
         def __init__(self):
-            self.pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-            self.face = mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+            self.pose = mp_pose.Pose(min_detection_confidence=0.5,
+                                     min_tracking_confidence=0.5)
+            self.face = mp_face.FaceDetection(model_selection=0,
+                                              min_detection_confidence=0.5)
 
             self.frame_count = 0
             self.face_visible = 0
@@ -133,21 +142,10 @@ with tab2:
             img = frame.to_ndarray(format="bgr24")
             h, w, _ = img.shape
 
+            # Brightness
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             self.brightness_values.append(float(np.mean(gray)))
 
+            # Motion estimate
             if self.prev_gray is not None:
                 diff = cv2.absdiff(gray, self.prev_gray)
-                self.motion_values.append(float(np.mean(diff)))
-            self.prev_gray = gray
-
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            face_res = self.face.process(rgb)
-            if face_res.detections:
-                self.face_visible += 1
-
-            pose_res = self.pose.process(rgb)
-            if pose_res.pose_landmarks:
-                lm = pose_res.pose_landmarks.landmark
-                ls = (lm[mp_pose.PoseLandmark.LEFT_SHOULDER].x * w,
-                      lm[mp_pose.P_]()
