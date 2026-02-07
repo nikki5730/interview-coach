@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  </head>
+
+  <body>
+    <video id="video" autoplay playsinline style="display:none;"></video>
+
+    <script>
+      const video = document.getElementById("video");
+
+      async function startCamera() {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        await video.play();
+      }
+
+      const pose = new Pose.Pose({
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
+
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      pose.onResults((results) => {
+        const lm = results.poseLandmarks || [];
+        const msg = JSON.stringify(lm);
+
+        // Send data to Streamlit component value
+        Streamlit.setComponentValue(msg);
+      });
+
+      async function run() {
+        await startCamera();
+        const camera = new CameraUtils.Camera(video, {
+          onFrame: async () => {
+            await pose.send({ image: video });
+          }
+        });
+        camera.start();
+      }
+
+      run();
+
+      // Required to initialize Streamlit component
+      Streamlit.onRender(() => {});
+    </script>
+  </body>
+</html>
