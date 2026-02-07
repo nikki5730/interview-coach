@@ -1,4 +1,7 @@
 import streamlit as st
+import json
+import numpy as np
+import streamlit.components.v1 as components
 
 # ------------------------------------------------------------
 # PAGE SETUP
@@ -12,6 +15,7 @@ st.write("Practice interview skills through text or video.")
 # CREATE BOTH TABS FIRST
 # ------------------------------------------------------------
 tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video Interview"])
+
 
 
 # ============================================================
@@ -71,41 +75,96 @@ with tab1:
 
             st.write("🛠️ **Suggestions:**")
             st.write("- Add one specific example.")
-            st.write("- Summarize your main point up front.")
-            st.write("- Use: *context → action → result*.")
+            st.write("- Summarize your main point early.")
+            st.write("- Use the structure: *context → action → result*.")
 
-            st.write("💛 **Reminder:** You do not need to mask. Clear communication is enough.")
-            st.write("🎯 Practice again in 3–4 sentences for clarity.")
+            st.write("💛 **Reminder:** Clear communication matters more than “perfect” delivery.")
+            st.write("🎯 Try rewriting your answer in 3–4 sentences for clarity.")
 
 
 
 # ============================================================
-#  TAB 2 — SAFE PLACEHOLDER (NO ERRORS)
+#  TAB 2 — REAL-TIME VIDEO AI (WORKING VERSION)
 # ============================================================
 with tab2:
 
-    st.header("🎥 Video Interview Practice")
+    st.header("🎥 Real-Time Video Interview AI")
+    st.write("This tool uses your webcam to analyze posture, head tilt, and movement in real time.")
 
-    st.info("""
-    🔧 **The real-time AI body-language analysis module is coming next.**
-
-    For now, this tab is a placeholder so your app deploys without errors.
-    """)
-
-    st.write("👇 This will soon become your live video feedback tool:")
-
-    st.image(
-        "https://cdn-icons-png.flaticon.com/512/1160/1160041.png",
-        width=250,
-        caption="Camera module loading soon…"
+    # Load camera + Mediapipe HTML module
+    components.html(
+        open("mediapipe_component.html").read(),
+        height=0,
+        width=0,
     )
 
-    st.write("""
-    ### What will be added:
-    - Real-time posture tracking  
-    - Head tilt detection  
-    - Movement level analysis  
-    - Neurodivergent-friendly feedback  
-    """)
+    # Streamlit reads updated URL parameter
+    query_params = st.experimental_get_query_params()
+    raw_landmarks = query_params.get("landmarks", ["[]"])[0]
 
-    st.success("Your app is working! Video AI module will be added safely.")
+    try:
+        landmarks = json.loads(raw_landmarks)
+    except:
+        landmarks = []
+
+    st.write("Detected landmarks:", len(landmarks))
+
+    if len(landmarks) < 33:
+        st.info("Make sure your face + shoulders are visible and well-lit for the model to detect your posture.")
+        st.stop()
+
+    # Convert list -> numpy array
+    lm = np.array([[p["x"], p["y"], p["z"]] for p in landmarks])
+
+    # Extract key points
+    nose = lm[0]
+    left_eye = lm[2]
+    right_eye = lm[5]
+    left_shoulder = lm[11]
+    right_shoulder = lm[12]
+
+    # Calculate head tilt
+    head_tilt = ((left_eye[1] + right_eye[1]) / 2) - nose[1]
+
+    # Shoulder alignment angle
+    posture_angle = np.degrees(np.arctan2(
+        left_shoulder[1] - right_shoulder[1],
+        left_shoulder[0] - right_shoulder[0]
+    ))
+
+    # Movement (frame-to-frame difference)
+    prev_frame = st.session_state.get("prev_frame")
+    if prev_frame is None:
+        st.session_state.prev_frame = lm
+        movement = 0
+    else:
+        movement = float(np.mean(np.abs(lm - prev_frame)))
+        st.session_state.prev_frame = lm
+
+    # Display analysis
+    st.subheader("📊 Live Body-Language Analysis")
+    st.json({
+        "head_tilt": head_tilt,
+        "posture_angle": posture_angle,
+        "movement": movement
+    })
+
+    st.subheader("💡 Interpretation (Neurodivergent-Friendly)")
+
+    # Head tilt
+    if abs(head_tilt) < 0.03:
+        st.write("✔ **Head centered** — great alignment.")
+    else:
+        st.write("➤ **Slight head tilt detected** — try adjusting camera height or sitting more upright.")
+
+    # Posture
+    if abs(posture_angle) < 8:
+        st.write("✔ **Shoulders level** — balanced posture detected.")
+    else:
+        st.write("➤ **Uneven shoulders** — grounding your body or adjusting your seat may help.")
+
+    # Movement
+    if movement < 0.01:
+        st.write("✔ **Movement steady** — low fidgeting detected.")
+    else:
+        st.write("➤ **Movement detected** — try grounding elbows or slowing breathing for comfort.")
