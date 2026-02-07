@@ -70,11 +70,11 @@ with tab1:
 
             st.write("🛠️ **Suggestions:**")
             st.write("- Add one specific example.")
-            st.write("- Summarize your main point up front.")
-            st.write("- Use: *context → action → result*.")
+            st.write("- Summarize your main point early.")
+            st.write("- Use the structure: *context → action → result*.")
 
-            st.write("💛 **Reminder:** You do not need to mask. Clear communication is enough.")
-            st.write("🎯 Practice again in 3–4 sentences for clarity.")
+            st.write("💛 **Reminder:** Clear communication matters more than 'perfect' performance.")
+            st.write("🎯 Try rewriting your answer in 3–4 sentences for clarity.")
 
 
 # ============================================================
@@ -82,89 +82,117 @@ with tab1:
 # ============================================================
 with tab2:
 
-    st.header("🎥 Video Interview Practice (Real-Time Analysis)")
-    st.write("Your browser will analyze posture, head tilt, and movement in real time.")
+    st.header("🎥 Video Interview Practice (Real-Time Mediapipe JS)")
+    st.write("This tool analyzes your posture, head tilt, and movement in real time.")
 
-    # Load external HTML component
+    # ------------------------------------------------------------
+    # Load and run Mediapipe JS in browser
+    # ------------------------------------------------------------
     components.html(
-        open("mediapipe_component.html").read(),
-        height=0,  # hidden video container
+        open("mediapipe_component.html").read() +
+        """
+        <script>
+        // Listen for Mediapipe landmark data and forward to Streamlit
+        window.addEventListener("message", (e) => {
+            if (e.data.streamlitMessage) {
+                Streamlit.setComponentValue(e.data.streamlitMessage);
+            }
+        });
+        </script>
+        """,
+        height=0,
         width=0,
     )
 
-    # Get data sent from JS
-    landmarks_json = st.experimental_get_query_params().get("landmarks", ["[]"])[0]
+    # ------------------------------------------------------------
+    # Receive landmark data from JS -> Python
+    # ------------------------------------------------------------
+    st_js = st.experimental_js(
+        """
+        // Tell Streamlit to accept incoming messages from JS
+        window.addEventListener("message", (e) => {
+            if (e.data.streamlitMessage) {
+                Streamlit.setComponentValue(e.data.streamlitMessage);
+            }
+        });
+        """
+    )
 
+    # Parse the incoming JSON landmark list
     try:
-        landmarks = json.loads(landmarks_json)
-        if isinstance(landmarks, str):
-            landmarks = json.loads(landmarks)
+        landmarks = json.loads(st_js or "[]")
     except:
         landmarks = []
 
     st.write("Detected landmarks:", len(landmarks))
 
-    # -----------------------------
+    # ------------------------------------------------------------
     # ANALYSIS FUNCTION
-    # -----------------------------
-    def analyze_landmarks(lm):
+    # ------------------------------------------------------------
+    def analyze(lm):
         if len(lm) < 33:
             return None
 
-        # Convert to array
-        lm = np.array([[p["x"], p["y"], p["z"]] for p in lm])
+        arr = np.array([[p["x"], p["y"], p["z"]] for p in lm])
 
-        nose = lm[0]
-        left_eye = lm[2]
-        right_eye = lm[5]
-        left_shoulder = lm[11]
-        right_shoulder = lm[12]
+        nose = arr[0]
+        left_eye = arr[2]
+        right_eye = arr[5]
+        left_shoulder = arr[11]
+        right_shoulder = arr[12]
 
         # Head tilt
-        head_tilt = (left_eye[1] + right_eye[1]) / 2 - nose[1]
+        head_tilt = ((left_eye[1] + right_eye[1]) / 2) - nose[1]
 
-        # Posture angle
+        # Shoulder alignment (posture)
         posture_angle = np.degrees(np.arctan2(
             left_shoulder[1] - right_shoulder[1],
             left_shoulder[0] - right_shoulder[0]
         ))
 
-        # Movement (difference from previous frame)
+        # Movement detection
         prev = st.session_state.get("prev_frame")
         if prev is None:
-            st.session_state.prev_frame = lm
+            st.session_state.prev_frame = arr
             movement = 0
         else:
-            movement = np.mean(np.abs(lm - prev))
-            st.session_state.prev_frame = lm
+            movement = float(np.mean(np.abs(arr - prev)))
+            st.session_state.prev_frame = arr
 
         return {
             "head_tilt": head_tilt,
             "posture_angle": posture_angle,
-            "movement": movement,
+            "movement": movement
         }
 
-    # -----------------------------
-    # Show analysis results
-    # -----------------------------
-    result = analyze_landmarks(landmarks)
+    # ------------------------------------------------------------
+    # RUN ANALYSIS AND DISPLAY FEEDBACK
+    # ------------------------------------------------------------
+    result = analyze(landmarks)
 
     if result:
         st.subheader("📊 Live Analysis")
-        st.write(result)
+        st.json(result)
 
         st.subheader("💡 Interpretation")
+
+        # Head tilt
         if abs(result["head_tilt"]) < 0.03:
-            st.write("✔ Head appears centered.")
+            st.write("✔ Head centered")
         else:
-            st.write("➤ Your head tilts slightly — try adjusting your camera height.")
+            st.write("➤ Slight head tilt — try adjusting your camera height.")
 
+        # Posture
         if abs(result["posture_angle"]) < 8:
-            st.write("✔ Shoulders look level — good upright posture.")
+            st.write("✔ Shoulders look level (good posture)")
         else:
-            st.write("➤ Shoulders uneven — try sitting tall or repositioning your camera.")
+            st.write("➤ Uneven shoulders — try sitting tall or stabilizing your position.")
 
+        # Movement
         if result["movement"] < 0.01:
-            st.write("✔ Movement level is steady.")
+            st.write("✔ Movement steady")
         else:
-            st.write("➤ Noticeable movement — resting elbows can help reduce motion.")
+            st.write("➤ Noticeable movement — grounding elbows can help reduce fidgeting.")
+
+
+  
