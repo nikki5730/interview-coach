@@ -3,14 +3,14 @@
 <head>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 
 <body>
-<video id="video" style="width: 0; height: 0;" autoplay></video>
+
+<video id="video" style="display:none;" autoplay></video>
 
 <script>
-  const video = document.getElementById('video');
+  const video = document.getElementById("video");
 
   async function initCamera() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -29,27 +29,26 @@
     minTrackingConfidence: 0.5
   });
 
-  pose.onResults((results) => {
-    const landmarks = results.poseLandmarks || [];
-    const payload = JSON.stringify(landmarks);
-    window.parent.postMessage({ landmarks: payload }, "*");
+  pose.onResults((res) => {
+    const data = res.poseLandmarks || [];
+    window.parent.postMessage({ type: "landmarks", data: data }, "*");
   });
 
-  async function runPose() {
+  async function run() {
     await initCamera();
 
-    const camera = new CameraUtils.Camera(video, {
+    const cam = new CameraUtils.Camera(video, {
       onFrame: async () => {
         await pose.send({ image: video });
-      },
-      width: 640,
-      height: 480
+      }
     });
 
-    camera.start();
+    cam.start();
   }
 
-  runPose();
+  run();
 </script>
+
 </body>
 </html>
+
