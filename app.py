@@ -9,10 +9,10 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Interview Coach", page_icon="💬")
 
 st.title("💬 Interview Coach")
-st.write("Practice interview skills through text or video.")
+st.write("Practice interview skills through text or live video AI analysis.")
 
 # ------------------------------------------------------------
-# CREATE BOTH TABS FIRST
+# CREATE TABS
 # ------------------------------------------------------------
 tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video Interview"])
 
@@ -70,101 +70,107 @@ with tab1:
         else:
             st.subheader("Feedback")
             st.write("✅ **What’s working:**")
-            st.write("- You responded directly to the question.")
+            st.write("- You directly answered the question.")
             st.write("- You shared relevant information.")
 
             st.write("🛠️ **Suggestions:**")
-            st.write("- Add one specific example.")
-            st.write("- Summarize your main point early.")
-            st.write("- Use the structure: *context → action → result*.")
+            st.write("- Add one clear example.")
+            st.write("- Start with your main point.")
+            st.write("- Use: *context → action → result* for structure.")
 
-            st.write("💛 **Reminder:** Clear communication matters more than “perfect” delivery.")
-            st.write("🎯 Try rewriting your answer in 3–4 sentences for clarity.")
+            st.write("💛 **Reminder:** You do not need to mask.")
+            st.write("🎯 Practice rewriting your answer shorter and clearer.")
 
 
 
 # ============================================================
-#  TAB 2 — REAL-TIME VIDEO AI (WORKING VERSION)
+#  TAB 2 — REAL-TIME VIDEO AI MODULE
 # ============================================================
 with tab2:
 
     st.header("🎥 Real-Time Video Interview AI")
-    st.write("This tool uses your webcam to analyze posture, head tilt, and movement in real time.")
+    st.write("This AI analyzes your posture, head tilt, and movement in real-time using your webcam.")
 
-    # Load camera + Mediapipe HTML module
-    components.html(
-        open("mediapipe_component.html").read(),
-        height=0,
-        width=0,
+    # Load HTML component that streams webcam + Mediapipe pose
+    pose_data = components.html(
+        open("pose_component.html").read(),
+        height=0,   # hidden
+        width=0
     )
 
-    # Streamlit reads updated URL parameter
-    query_params = st.experimental_get_query_params()
-    raw_landmarks = query_params.get("landmarks", ["[]"])[0]
+    # Receive pose landmarks from the HTML component
+    raw_landmarks = pose_data
 
+    if raw_landmarks is None:
+        st.info("Waiting for webcam… please allow camera access.")
+        st.stop()
+
+    # Convert from JSON string → python list
     try:
         landmarks = json.loads(raw_landmarks)
     except:
-        landmarks = []
-
-    st.write("Detected landmarks:", len(landmarks))
-
-    if len(landmarks) < 33:
-        st.info("Make sure your face + shoulders are visible and well-lit for the model to detect your posture.")
+        st.warning("No pose detected yet — ensure you are visible to the camera.")
         st.stop()
 
-    # Convert list -> numpy array
+    st.write(f"Detected landmarks: {len(landmarks)}")
+
+    if len(landmarks) < 33:
+        st.info("Adjust lighting or ensure your face + shoulders are visible.")
+        st.stop()
+
+    # Convert to numpy array
     lm = np.array([[p["x"], p["y"], p["z"]] for p in landmarks])
 
-    # Extract key points
+    # Extract relevant keypoints
     nose = lm[0]
     left_eye = lm[2]
     right_eye = lm[5]
     left_shoulder = lm[11]
     right_shoulder = lm[12]
 
-    # Calculate head tilt
+    # Head Tilt Calculation
     head_tilt = ((left_eye[1] + right_eye[1]) / 2) - nose[1]
 
-    # Shoulder alignment angle
+    # Shoulder Posture Angle
     posture_angle = np.degrees(np.arctan2(
         left_shoulder[1] - right_shoulder[1],
         left_shoulder[0] - right_shoulder[0]
     ))
 
-    # Movement (frame-to-frame difference)
-    prev_frame = st.session_state.get("prev_frame")
-    if prev_frame is None:
+    # Movement Calculation
+    prev = st.session_state.get("prev_frame")
+    if prev is None:
         st.session_state.prev_frame = lm
         movement = 0
     else:
-        movement = float(np.mean(np.abs(lm - prev_frame)))
+        movement = float(np.mean(np.abs(lm - prev)))
         st.session_state.prev_frame = lm
 
-    # Display analysis
-    st.subheader("📊 Live Body-Language Analysis")
+    # Display processed metrics
+    st.subheader("📊 Live Body-Language Metrics")
     st.json({
         "head_tilt": head_tilt,
         "posture_angle": posture_angle,
         "movement": movement
     })
 
+    # Interpretation
     st.subheader("💡 Interpretation (Neurodivergent-Friendly)")
 
     # Head tilt
     if abs(head_tilt) < 0.03:
-        st.write("✔ **Head centered** — great alignment.")
+        st.write("✔ **Head centered** — stable alignment.")
     else:
-        st.write("➤ **Slight head tilt detected** — try adjusting camera height or sitting more upright.")
+        st.write("➤ **Head tilted** — try adjusting camera position.")
 
     # Posture
     if abs(posture_angle) < 8:
-        st.write("✔ **Shoulders level** — balanced posture detected.")
+        st.write("✔ **Shoulders level** — good posture.")
     else:
-        st.write("➤ **Uneven shoulders** — grounding your body or adjusting your seat may help.")
+        st.write("➤ **Uneven shoulders** — adjusting your sitting position may help.")
 
     # Movement
     if movement < 0.01:
-        st.write("✔ **Movement steady** — low fidgeting detected.")
+        st.write("✔ **Low movement** — calm body language.")
     else:
-        st.write("➤ **Movement detected** — try grounding elbows or slowing breathing for comfort.")
+        st.write("➤ **Movement detected** — grounding elbows can provide stability.")
