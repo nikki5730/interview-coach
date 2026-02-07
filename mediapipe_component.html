@@ -6,8 +6,7 @@
 </head>
 
 <body>
-
-<video id="video" style="display:none;" autoplay></video>
+<video id="video" autoplay style="display:none;"></video>
 
 <script>
   const video = document.getElementById("video");
@@ -29,26 +28,25 @@
     minTrackingConfidence: 0.5
   });
 
-  pose.onResults((res) => {
-    const data = res.poseLandmarks || [];
-    window.parent.postMessage({ type: "landmarks", data: data }, "*");
+  pose.onResults((results) => {
+    const landmarks = results.poseLandmarks || [];
+    const message = JSON.stringify(landmarks);
+    window.parent.postMessage({ type: "FROM_JS", value: message }, "*");
   });
 
   async function run() {
     await initCamera();
 
-    const cam = new CameraUtils.Camera(video, {
+    const camera = new CameraUtils.Camera(video, {
       onFrame: async () => {
         await pose.send({ image: video });
       }
     });
 
-    cam.start();
+    camera.start();
   }
 
   run();
 </script>
-
 </body>
 </html>
-
