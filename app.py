@@ -5,9 +5,9 @@ from pathlib import Path
 import streamlit as st
 from faster_whisper import WhisperModel
 
-st.set_page_config(page_title="Interview Coach (No-Cost)", page_icon="💬")
-st.title("💬 Interview Coach (No-Cost)")
-st.write("Free local transcription + interview feedback (no API key).")
+st.set_page_config(page_title="Interview Coach (Local Free)", page_icon="💬")
+st.title("💬 Interview Coach (Local Free)")
+st.write("Local transcription + feedback. No OpenAI API key needed.")
 
 QUESTIONS = [
     "Tell me about yourself in a work or school context.",
@@ -32,18 +32,18 @@ def load_model():
     return WhisperModel("tiny", device="cpu", compute_type="int8")
 
 
-def transcribe_local(file_bytes: bytes, filename: str) -> str:
+def transcribe_local(file_bytes, filename):
     ext = Path(filename).suffix.lower() or ".mp4"
     with tempfile.TemporaryDirectory() as td:
-        p = Path(td) / f"upload{ext}"
-        p.write_bytes(file_bytes)
+        file_path = Path(td) / ("upload" + ext)
+        file_path.write_bytes(file_bytes)
         model = load_model()
-        segments, _ = model.transcribe(str(p), vad_filter=True, beam_size=1)
+        segments, _ = model.transcribe(str(file_path), vad_filter=True, beam_size=1)
         text = " ".join(seg.text.strip() for seg in segments).strip()
     return text
 
 
-def analyze_answer(answer: str) -> dict:
+def analyze_answer(answer):
     text = answer.strip()
     words = re.findall(r"\b[\w']+\b", text.lower())
     word_count = len(words)
@@ -58,6 +58,7 @@ def analyze_answer(answer: str) -> dict:
         score += 10
     elif word_count < 40:
         score -= 8
+
     score -= min(10, filler_count * 2)
     if has_action:
         score += 8
@@ -67,23 +68,29 @@ def analyze_answer(answer: str) -> dict:
         score += 6
     score = max(40, min(95, score))
 
-    strengths, improvements = [], []
+    strengths = []
+    improvements = []
+
     if word_count >= 40:
         strengths.append("Your answer has enough detail.")
     else:
-        improvements.append("Add more detail (target 60–120 words).")
+        improvements.append("Add more detail (target 60-120 words).")
+
     if filler_count <= 2:
         strengths.append("Your delivery sounds reasonably clear.")
     else:
         improvements.append("Reduce filler words by pausing between ideas.")
+
     if has_action:
         strengths.append("You described actions you took.")
     else:
         improvements.append("Use action verbs like built, led, solved, improved.")
+
     if has_result or has_number:
         strengths.append("You included outcome-focused language.")
     else:
         improvements.append("Add measurable results (number, %, time saved).")
+
     if len(improvements) < 3:
         improvements.append("Use STAR: Situation, Task, Action, Result.")
 
@@ -96,13 +103,15 @@ def analyze_answer(answer: str) -> dict:
     }
 
 
-def render_feedback(feedback: dict):
+def render_feedback(feedback):
     st.subheader("Feedback")
     st.metric("Overall Score", f"{feedback['overall_score']}/100")
     st.write(f"Words: **{feedback['word_count']}** | Filler words: **{feedback['filler_count']}**")
+
     st.write("✅ **What is working**")
     for s in feedback["strengths"]:
         st.write(f"- {s}")
+
     st.write("🛠️ **What to improve next**")
     for i in feedback["improvements"]:
         st.write(f"- {i}")
@@ -121,17 +130,28 @@ with tab1:
 
 with tab2:
     q2 = st.selectbox("Interview question", QUESTIONS, key="q2")
-    uploaded = st.file_uploader("Upload recording", type=["mp4", "mov", "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "ogg", "flac"])
+    uploaded = st.file_uploader(
+        "Upload recording (.mp4, .mov, .webm, .wav, .mp3, .m4a)",
+        type=["mp4", "mov", "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "ogg", "flac"]
+    )
+
     if st.button("Analyze recording", type="primary"):
         if uploaded is None:
             st.warning("Please upload a recording first.")
         else:
-            with st.spinner("Transcribing..."):
-                transcript = transcribe_local(uploaded.getvalue(), uploaded.name)
-            if not transcript:
-                st.error("Could not detect speech.")
-            else:
-                st.subheader("Transcript")
-                st.write(transcript)
-                st.write(f"Question: **{q2}**")
-                render_feedback(analyze_answer(transcript))
+            try:
+                with st.spinner("Transcribing locally..."):
+                    transcript = transcribe_local(uploaded.getvalue(), uploaded.name)
+                if not transcript:
+                    st.error("No speech detected.")
+                else:
+                    st.subheader("Transcript")
+                    st.write(transcript)
+                    st.write(f"Question: **{q2}**")
+                    render_feedback(analyze_answer(transcript))
+            except Exception as e:
+                st.error("Local transcription failed on this file format.")
+                st.info("Try .m4a or .wav, or paste transcript manually below.")
+                manual = st.text_area("Paste transcript", height=150)
+                if manual.strip():
+                    render_feedback(analyze_answer(manual.strip()))
