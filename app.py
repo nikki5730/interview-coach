@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 
 
-def get_client() -> OpenAI | None:
+def get_client() -> Optional[OpenAI]:
     if not OPENAI_API_KEY:
         return None
     return OpenAI(api_key=OPENAI_API_KEY)
