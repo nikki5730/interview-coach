@@ -149,7 +149,7 @@ with tab2:
                     st.write(transcript)
                     st.write(f"Question: **{q2}**")
                     render_feedback(analyze_answer(transcript))
-            except Exception as e:
+            except Exception:
                 st.error("Local transcription failed on this file format.")
                 st.info("Try .m4a or .wav, or paste transcript manually below.")
                 manual = st.text_area("Paste transcript", height=150)
