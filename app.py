@@ -1,6 +1,5 @@
-import json
+ import json
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -32,7 +31,7 @@ QUESTIONS = [
     "What questions would you like to ask the interviewer?",
 ]
 
-VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".mpeg4"}
 AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 
 
@@ -101,23 +100,6 @@ Return JSON only in this shape:
         return fallback_feedback(answer)
 
 
-def extract_audio_to_wav(input_path: Path) -> Path:
-    output_path = input_path.with_suffix(".wav")
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(input_path),
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        str(output_path),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return output_path
-
-
 def transcribe_media(file_bytes: bytes, filename: str) -> str:
     client = get_client()
     if client is None:
@@ -131,18 +113,11 @@ def transcribe_media(file_bytes: bytes, filename: str) -> str:
         in_path = Path(td) / f"upload{ext or '.webm'}"
         in_path.write_bytes(file_bytes)
 
-        tx_path = in_path
-        if ext in VIDEO_EXTS:
-            try:
-                tx_path = extract_audio_to_wav(in_path)
-            except FileNotFoundError as exc:
-                raise RuntimeError("ffmpeg is not installed. Install ffmpeg first.") from exc
-            except subprocess.CalledProcessError as exc:
-                msg = exc.stderr.decode("utf-8", errors="ignore")[:250]
-                raise RuntimeError(f"ffmpeg failed: {msg}") from exc
-
-        with tx_path.open("rb") as media_file:
-            out = client.audio.transcriptions.create(model=TRANSCRIBE_MODEL, file=media_file)
+        with in_path.open("rb") as media_file:
+            out = client.audio.transcriptions.create(
+                model=TRANSCRIBE_MODEL,
+                file=media_file
+            )
 
     text = (getattr(out, "text", "") or "").strip()
     if not text:
@@ -156,15 +131,12 @@ def render_feedback(feedback: dict) -> None:
     if score is not None:
         st.metric("Overall Score", f"{score}/100")
 
-    strengths = feedback.get("strengths", [])
-    improvements = feedback.get("improvements", [])
-
     st.write("✅ **What is working**")
-    for item in strengths:
+    for item in feedback.get("strengths", []):
         st.write(f"- {item}")
 
     st.write("🛠️ **What to improve next**")
-    for item in improvements:
+    for item in feedback.get("improvements", []):
         st.write(f"- {item}")
 
     if feedback.get("encouragement"):
@@ -191,7 +163,7 @@ with tab2:
     question2 = st.selectbox("Interview question", QUESTIONS, key="q2")
     uploaded = st.file_uploader(
         "Upload your answer (.mp4, .mov, .webm, .wav, .mp3, .m4a)",
-        type=["mp4", "mov", "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "ogg", "flac"],
+        type=["mp4", "mov", "webm", "mkv", "avi", "mpeg4", "wav", "mp3", "m4a", "aac", "ogg", "flac"],
     )
 
     if st.button("Analyze recording", type="primary"):
@@ -207,5 +179,3 @@ with tab2:
                     render_feedback(feedback)
                 except Exception as exc:
                     st.error(str(exc))
-
-    st.caption("Note: real-time pose tracking through components.html is not supported without a custom Streamlit component.")
