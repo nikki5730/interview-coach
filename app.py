@@ -1,22 +1,13 @@
-import json
-import os
+import re
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import streamlit as st
-from dotenv import load_dotenv
-from openai import OpenAI
+from faster_whisper import WhisperModel
 
-load_dotenv()
-
-st.set_page_config(page_title="Interview Coach", page_icon="💬")
-st.title("💬 Interview Coach")
-st.write("Practice interview skills through text or recorded interview answers.")
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
-FEEDBACK_MODEL = os.getenv("FEEDBACK_MODEL", "gpt-4.1-mini")
+st.set_page_config(page_title="Interview Coach (No-Cost)", page_icon="💬")
+st.title("💬 Interview Coach (No-Cost)")
+st.write("Free local transcription + interview feedback (no API key).")
 
 QUESTIONS = [
     "Tell me about yourself in a work or school context.",
@@ -31,151 +22,116 @@ QUESTIONS = [
     "What questions would you like to ask the interviewer?",
 ]
 
-VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".mpeg4"}
-AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
+FILLERS = {"um", "uh", "like", "actually", "basically", "you know"}
+ACTION_WORDS = {"built", "created", "led", "organized", "improved", "managed", "delivered", "solved", "implemented"}
+RESULT_WORDS = {"result", "improved", "increased", "reduced", "%", "faster", "on time", "completed"}
 
 
-def get_client() -> Optional[OpenAI]:
-    if not OPENAI_API_KEY:
-        return None
-    return OpenAI(api_key=OPENAI_API_KEY)
+@st.cache_resource
+def load_model():
+    return WhisperModel("tiny", device="cpu", compute_type="int8")
 
 
-def fallback_feedback(answer: str) -> dict:
-    words = answer.split()
-    filler_set = {"um", "uh", "like", "actually", "basically"}
-    filler_count = sum(1 for w in words if w.lower().strip(".,!?") in filler_set)
-    return {
-        "overall_score": max(55, min(90, 72 + (len(words) // 20) - filler_count)),
-        "strengths": [
-            "You answered directly.",
-            "Your message is understandable.",
-        ],
-        "improvements": [
-            "Add one concrete example.",
-            "Use context -> action -> result structure.",
-            "Pause instead of filler words.",
-        ],
-        "encouragement": "Nice work. Keep practicing one question at a time.",
-    }
-
-
-def ai_feedback(question: str, answer: str) -> dict:
-    client = get_client()
-    if client is None:
-        return fallback_feedback(answer)
-
-    prompt = f"""
-You are a supportive interview coach for neurodivergent candidates.
-Provide kind, practical, and specific feedback.
-
-Question: {question}
-Answer: {answer}
-
-Return JSON only in this shape:
-{{
-  "overall_score": 0-100 number,
-  "strengths": ["...", "..."],
-  "improvements": ["...", "...", "..."],
-  "encouragement": "..."
-}}
-""".strip()
-
-    try:
-        completion = client.chat.completions.create(
-            model=FEEDBACK_MODEL,
-            messages=[
-                {"role": "system", "content": "You are an expert interview coach."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-        )
-        content = completion.choices[0].message.content or "{}"
-        parsed = json.loads(content)
-        if not isinstance(parsed, dict):
-            return fallback_feedback(answer)
-        return parsed
-    except Exception:
-        return fallback_feedback(answer)
-
-
-def transcribe_media(file_bytes: bytes, filename: str) -> str:
-    client = get_client()
-    if client is None:
-        raise RuntimeError("OPENAI_API_KEY missing. Add it to your .env file.")
-
-    ext = Path(filename).suffix.lower()
-    if ext not in VIDEO_EXTS and ext not in AUDIO_EXTS:
-        raise RuntimeError("Unsupported file type. Upload audio/video file.")
-
+def transcribe_local(file_bytes: bytes, filename: str) -> str:
+    ext = Path(filename).suffix.lower() or ".mp4"
     with tempfile.TemporaryDirectory() as td:
-        in_path = Path(td) / f"upload{ext or '.webm'}"
-        in_path.write_bytes(file_bytes)
-
-        with in_path.open("rb") as media_file:
-            out = client.audio.transcriptions.create(
-                model=TRANSCRIBE_MODEL,
-                file=media_file
-            )
-
-    text = (getattr(out, "text", "") or "").strip()
-    if not text:
-        raise RuntimeError("No speech detected.")
+        p = Path(td) / f"upload{ext}"
+        p.write_bytes(file_bytes)
+        model = load_model()
+        segments, _ = model.transcribe(str(p), vad_filter=True, beam_size=1)
+        text = " ".join(seg.text.strip() for seg in segments).strip()
     return text
 
 
-def render_feedback(feedback: dict) -> None:
+def analyze_answer(answer: str) -> dict:
+    text = answer.strip()
+    words = re.findall(r"\b[\w']+\b", text.lower())
+    word_count = len(words)
+    filler_count = sum(1 for w in words if w in FILLERS)
+
+    has_action = any(w in words for w in ACTION_WORDS)
+    has_result = any(token in text.lower() for token in RESULT_WORDS)
+    has_number = bool(re.search(r"\d", text))
+
+    score = 60
+    if 60 <= word_count <= 180:
+        score += 10
+    elif word_count < 40:
+        score -= 8
+    score -= min(10, filler_count * 2)
+    if has_action:
+        score += 8
+    if has_result:
+        score += 8
+    if has_number:
+        score += 6
+    score = max(40, min(95, score))
+
+    strengths, improvements = [], []
+    if word_count >= 40:
+        strengths.append("Your answer has enough detail.")
+    else:
+        improvements.append("Add more detail (target 60–120 words).")
+    if filler_count <= 2:
+        strengths.append("Your delivery sounds reasonably clear.")
+    else:
+        improvements.append("Reduce filler words by pausing between ideas.")
+    if has_action:
+        strengths.append("You described actions you took.")
+    else:
+        improvements.append("Use action verbs like built, led, solved, improved.")
+    if has_result or has_number:
+        strengths.append("You included outcome-focused language.")
+    else:
+        improvements.append("Add measurable results (number, %, time saved).")
+    if len(improvements) < 3:
+        improvements.append("Use STAR: Situation, Task, Action, Result.")
+
+    return {
+        "overall_score": score,
+        "word_count": word_count,
+        "filler_count": filler_count,
+        "strengths": strengths[:3],
+        "improvements": improvements[:3],
+    }
+
+
+def render_feedback(feedback: dict):
     st.subheader("Feedback")
-    score = feedback.get("overall_score")
-    if score is not None:
-        st.metric("Overall Score", f"{score}/100")
-
+    st.metric("Overall Score", f"{feedback['overall_score']}/100")
+    st.write(f"Words: **{feedback['word_count']}** | Filler words: **{feedback['filler_count']}**")
     st.write("✅ **What is working**")
-    for item in feedback.get("strengths", []):
-        st.write(f"- {item}")
-
+    for s in feedback["strengths"]:
+        st.write(f"- {s}")
     st.write("🛠️ **What to improve next**")
-    for item in feedback.get("improvements", []):
-        st.write(f"- {item}")
-
-    if feedback.get("encouragement"):
-        st.info(feedback["encouragement"])
+    for i in feedback["improvements"]:
+        st.write(f"- {i}")
 
 
 tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video/Audio Practice"])
 
 with tab1:
-    st.header("📝 Text-Based Interview Practice")
-    question = st.selectbox("Choose an interview question", QUESTIONS)
-    answer = st.text_area("Type your answer", height=180)
-
-    if st.button("Get text feedback", type="primary"):
-        if not answer.strip():
-            st.warning("Please type an answer first.")
+    q1 = st.selectbox("Question", QUESTIONS)
+    a1 = st.text_area("Type your answer", height=180)
+    if st.button("Get feedback"):
+        if a1.strip():
+            render_feedback(analyze_answer(a1))
         else:
-            render_feedback(ai_feedback(question=question, answer=answer.strip()))
+            st.warning("Please type an answer first.")
 
 with tab2:
-    st.header("🎥 Video/Audio Interview Practice")
-    st.write("Upload a recorded answer and get transcript + AI feedback.")
-
-    question2 = st.selectbox("Interview question", QUESTIONS, key="q2")
-    uploaded = st.file_uploader(
-        "Upload your answer (.mp4, .mov, .webm, .wav, .mp3, .m4a)",
-        type=["mp4", "mov", "webm", "mkv", "avi", "mpeg4", "wav", "mp3", "m4a", "aac", "ogg", "flac"],
-    )
-
+    q2 = st.selectbox("Interview question", QUESTIONS, key="q2")
+    uploaded = st.file_uploader("Upload recording", type=["mp4", "mov", "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "ogg", "flac"])
     if st.button("Analyze recording", type="primary"):
         if uploaded is None:
             st.warning("Please upload a recording first.")
         else:
-            with st.spinner("Transcribing and generating feedback..."):
-                try:
-                    transcript = transcribe_media(uploaded.getvalue(), uploaded.name)
-                    st.subheader("Transcript")
-                    st.write(transcript)
-                    feedback = ai_feedback(question=question2, answer=transcript)
-                    render_feedback(feedback)
-                except Exception as exc:
-                    st.error(str(exc))
+            with st.spinner("Transcribing..."):
+                transcript = transcribe_local(uploaded.getvalue(), uploaded.name)
+            if not transcript:
+                st.error("Could not detect speech.")
+            else:
+                st.subheader("Transcript")
+                st.write(transcript)
+                st.write(f"Question: **{q2}**")
+                render_feedback(analyze_answer(transcript))
