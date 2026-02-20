@@ -1,176 +1,210 @@
-import streamlit as st
 import json
-import numpy as np
-import streamlit.components.v1 as components
+import os
+import subprocess
+import tempfile
+from pathlib import Path
 
-# ------------------------------------------------------------
-# PAGE SETUP
-# ------------------------------------------------------------
+import streamlit as st
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+
 st.set_page_config(page_title="Interview Coach", page_icon="💬")
-
 st.title("💬 Interview Coach")
-st.write("Practice interview skills through text or live video AI analysis.")
+st.write("Practice interview skills through text or recorded interview answers.")
 
-# ------------------------------------------------------------
-# CREATE TABS
-# ------------------------------------------------------------
-tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video Interview"])
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+FEEDBACK_MODEL = os.getenv("FEEDBACK_MODEL", "gpt-4.1-mini")
+
+QUESTIONS = [
+    "Tell me about yourself in a work or school context.",
+    "What kind of work environment helps you do your best work?",
+    "What does a good workday look like for you?",
+    "What are your strongest skills or abilities?",
+    "Tell me about a challenge you faced and how you handled it.",
+    "How do you usually communicate with teammates or coworkers?",
+    "How do you stay organized or keep track of tasks?",
+    "How do you respond to feedback?",
+    "What motivates you to do your best work?",
+    "What questions would you like to ask the interviewer?",
+]
+
+VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
+AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 
 
+def get_client() -> OpenAI | None:
+    if not OPENAI_API_KEY:
+        return None
+    return OpenAI(api_key=OPENAI_API_KEY)
 
-# ============================================================
-#  TAB 1 — TEXT INTERVIEW PRACTICE
-# ============================================================
-with tab1:
 
-    st.header("📝 Text-Based Interview Practice")
+def fallback_feedback(answer: str) -> dict:
+    words = answer.split()
+    filler_set = {"um", "uh", "like", "actually", "basically"}
+    filler_count = sum(1 for w in words if w.lower().strip(".,!?") in filler_set)
+    return {
+        "overall_score": max(55, min(90, 72 + (len(words) // 20) - filler_count)),
+        "strengths": [
+            "You answered directly.",
+            "Your message is understandable.",
+        ],
+        "improvements": [
+            "Add one concrete example.",
+            "Use context -> action -> result structure.",
+            "Pause instead of filler words.",
+        ],
+        "encouragement": "Nice work. Keep practicing one question at a time.",
+    }
 
-    questions = [
-        "Tell me about yourself in a work or school context.",
-        "What kind of work environment helps you do your best work?",
-        "What does a good workday look like for you?",
-        "What are your strongest skills or abilities?",
-        "What tasks do you tend to pick up quickly?",
-        "What type of work do you find most engaging or satisfying?",
-        "What are you especially careful or detail-oriented about?",
-        "Tell me about a task or project you completed successfully.",
-        "Tell me about a challenge you faced and how you handled it.",
-        "Tell me about a time something didn’t go as planned. What did you do?",
-        "How do you usually approach solving a problem?",
-        "How do you prefer to receive instructions or feedback?",
-        "How do you usually communicate with teammates or coworkers?",
-        "Tell me about a time you worked with someone who had a different style than you.",
-        "What helps you communicate clearly at work?",
-        "How do you stay organized or keep track of tasks?",
-        "How do you handle multiple tasks or deadlines?",
-        "What tools or strategies help you manage your work?",
-        "How do you usually handle stress or pressure?",
-        "What support helps you perform well at work?",
-        "What accommodations or adjustments have helped you succeed in the past?",
-        "How do you take care of yourself during demanding periods?",
-        "How do you learn new tasks or skills best?",
-        "Tell me about something new you learned recently.",
-        "How do you respond to feedback?",
-        "What values are important to you in a workplace?",
-        "What kind of team culture do you work best in?",
-        "What motivates you to do your best work?",
-        "What kinds of roles or tasks are you interested in long-term?",
-        "What skills would you like to develop next?",
-        "Where do you see yourself growing professionally?",
-        "Is there anything you would like your interviewer to understand about how you work?",
-        "What questions would you like to ask the interviewer?"
+
+def ai_feedback(question: str, answer: str) -> dict:
+    client = get_client()
+    if client is None:
+        return fallback_feedback(answer)
+
+    prompt = f"""
+You are a supportive interview coach for neurodivergent candidates.
+Provide kind, practical, and specific feedback.
+
+Question: {question}
+Answer: {answer}
+
+Return JSON only in this shape:
+{{
+  "overall_score": 0-100 number,
+  "strengths": ["...", "..."],
+  "improvements": ["...", "...", "..."],
+  "encouragement": "..."
+}}
+""".strip()
+
+    try:
+        completion = client.chat.completions.create(
+            model=FEEDBACK_MODEL,
+            messages=[
+                {"role": "system", "content": "You are an expert interview coach."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        content = completion.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        if not isinstance(parsed, dict):
+            return fallback_feedback(answer)
+        return parsed
+    except Exception:
+        return fallback_feedback(answer)
+
+
+def extract_audio_to_wav(input_path: Path) -> Path:
+    output_path = input_path.with_suffix(".wav")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        str(output_path),
     ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
 
-    question = st.selectbox("Choose an interview question:", questions)
-    answer = st.text_area("Type your answer below:", height=180)
 
-    if st.button("Get feedback"):
+def transcribe_media(file_bytes: bytes, filename: str) -> str:
+    client = get_client()
+    if client is None:
+        raise RuntimeError("OPENAI_API_KEY missing. Add it to your .env file.")
+
+    ext = Path(filename).suffix.lower()
+    if ext not in VIDEO_EXTS and ext not in AUDIO_EXTS:
+        raise RuntimeError("Unsupported file type. Upload audio/video file.")
+
+    with tempfile.TemporaryDirectory() as td:
+        in_path = Path(td) / f"upload{ext or '.webm'}"
+        in_path.write_bytes(file_bytes)
+
+        tx_path = in_path
+        if ext in VIDEO_EXTS:
+            try:
+                tx_path = extract_audio_to_wav(in_path)
+            except FileNotFoundError as exc:
+                raise RuntimeError("ffmpeg is not installed. Install ffmpeg first.") from exc
+            except subprocess.CalledProcessError as exc:
+                msg = exc.stderr.decode("utf-8", errors="ignore")[:250]
+                raise RuntimeError(f"ffmpeg failed: {msg}") from exc
+
+        with tx_path.open("rb") as media_file:
+            out = client.audio.transcriptions.create(model=TRANSCRIBE_MODEL, file=media_file)
+
+    text = (getattr(out, "text", "") or "").strip()
+    if not text:
+        raise RuntimeError("No speech detected.")
+    return text
+
+
+def render_feedback(feedback: dict) -> None:
+    st.subheader("Feedback")
+    score = feedback.get("overall_score")
+    if score is not None:
+        st.metric("Overall Score", f"{score}/100")
+
+    strengths = feedback.get("strengths", [])
+    improvements = feedback.get("improvements", [])
+
+    st.write("✅ **What is working**")
+    for item in strengths:
+        st.write(f"- {item}")
+
+    st.write("🛠️ **What to improve next**")
+    for item in improvements:
+        st.write(f"- {item}")
+
+    if feedback.get("encouragement"):
+        st.info(feedback["encouragement"])
+
+
+tab1, tab2 = st.tabs(["📝 Text Practice", "🎥 Video/Audio Practice"])
+
+with tab1:
+    st.header("📝 Text-Based Interview Practice")
+    question = st.selectbox("Choose an interview question", QUESTIONS)
+    answer = st.text_area("Type your answer", height=180)
+
+    if st.button("Get text feedback", type="primary"):
         if not answer.strip():
             st.warning("Please type an answer first.")
         else:
-            st.subheader("Feedback")
-            st.write("✅ **What’s working:**")
-            st.write("- You directly answered the question.")
-            st.write("- You shared relevant information.")
+            render_feedback(ai_feedback(question=question, answer=answer.strip()))
 
-            st.write("🛠️ **Suggestions:**")
-            st.write("- Add one clear example.")
-            st.write("- Start with your main point.")
-            st.write("- Use: *context → action → result* for structure.")
-
-            st.write("💛 **Reminder:** You do not need to mask.")
-            st.write("🎯 Practice rewriting your answer shorter and clearer.")
-
-
-
-# ============================================================
-#  TAB 2 — REAL-TIME VIDEO AI MODULE
-# ============================================================
 with tab2:
+    st.header("🎥 Video/Audio Interview Practice")
+    st.write("Upload a recorded answer and get transcript + AI feedback.")
 
-    st.header("🎥 Real-Time Video Interview AI")
-    st.write("This AI analyzes your posture, head tilt, and movement in real-time using your webcam.")
-
-    # Load HTML component that streams webcam + Mediapipe pose
-    pose_data = components.html(
-        open("pose_component.html").read(),
-        height=0,   # hidden
-        width=0
+    question2 = st.selectbox("Interview question", QUESTIONS, key="q2")
+    uploaded = st.file_uploader(
+        "Upload your answer (.mp4, .mov, .webm, .wav, .mp3, .m4a)",
+        type=["mp4", "mov", "webm", "mkv", "avi", "wav", "mp3", "m4a", "aac", "ogg", "flac"],
     )
 
-    # Receive pose landmarks from the HTML component
-    raw_landmarks = pose_data
+    if st.button("Analyze recording", type="primary"):
+        if uploaded is None:
+            st.warning("Please upload a recording first.")
+        else:
+            with st.spinner("Transcribing and generating feedback..."):
+                try:
+                    transcript = transcribe_media(uploaded.getvalue(), uploaded.name)
+                    st.subheader("Transcript")
+                    st.write(transcript)
+                    feedback = ai_feedback(question=question2, answer=transcript)
+                    render_feedback(feedback)
+                except Exception as exc:
+                    st.error(str(exc))
 
-    if raw_landmarks is None:
-        st.info("Waiting for webcam… please allow camera access.")
-        st.stop()
-
-    # Convert from JSON string → python list
-    try:
-        landmarks = json.loads(raw_landmarks)
-    except:
-        st.warning("No pose detected yet — ensure you are visible to the camera.")
-        st.stop()
-
-    st.write(f"Detected landmarks: {len(landmarks)}")
-
-    if len(landmarks) < 33:
-        st.info("Adjust lighting or ensure your face + shoulders are visible.")
-        st.stop()
-
-    # Convert to numpy array
-    lm = np.array([[p["x"], p["y"], p["z"]] for p in landmarks])
-
-    # Extract relevant keypoints
-    nose = lm[0]
-    left_eye = lm[2]
-    right_eye = lm[5]
-    left_shoulder = lm[11]
-    right_shoulder = lm[12]
-
-    # Head Tilt Calculation
-    head_tilt = ((left_eye[1] + right_eye[1]) / 2) - nose[1]
-
-    # Shoulder Posture Angle
-    posture_angle = np.degrees(np.arctan2(
-        left_shoulder[1] - right_shoulder[1],
-        left_shoulder[0] - right_shoulder[0]
-    ))
-
-    # Movement Calculation
-    prev = st.session_state.get("prev_frame")
-    if prev is None:
-        st.session_state.prev_frame = lm
-        movement = 0
-    else:
-        movement = float(np.mean(np.abs(lm - prev)))
-        st.session_state.prev_frame = lm
-
-    # Display processed metrics
-    st.subheader("📊 Live Body-Language Metrics")
-    st.json({
-        "head_tilt": head_tilt,
-        "posture_angle": posture_angle,
-        "movement": movement
-    })
-
-    # Interpretation
-    st.subheader("💡 Interpretation (Neurodivergent-Friendly)")
-
-    # Head tilt
-    if abs(head_tilt) < 0.03:
-        st.write("✔ **Head centered** — stable alignment.")
-    else:
-        st.write("➤ **Head tilted** — try adjusting camera position.")
-
-    # Posture
-    if abs(posture_angle) < 8:
-        st.write("✔ **Shoulders level** — good posture.")
-    else:
-        st.write("➤ **Uneven shoulders** — adjusting your sitting position may help.")
-
-    # Movement
-    if movement < 0.01:
-        st.write("✔ **Low movement** — calm body language.")
-    else:
-        st.write("➤ **Movement detected** — grounding elbows can provide stability.")
+    st.caption("Note: real-time pose tracking through components.html is not supported without a custom Streamlit component.")
